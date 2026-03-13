@@ -1,0 +1,31 @@
+{
+  "name": "channelpilot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.32.0",
+  "license": "MIT",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "pnpm --filter @channelpilot/db exec prisma generate --schema prisma/schema.prisma",
+    "db:migrate": "pnpm --filter @channelpilot/db exec prisma migrate deploy --schema prisma/schema.prisma",
+    "dev:api": "pnpm --filter @channelpilot/api dev",
+    "dev:reconciler": "pnpm --filter @channelpilot/reconciler dev",
+    "dev:notifier": "pnpm --filter @channelpilot/notifier dev",
+    "dev:worker-registry": "pnpm --filter @channelpilot/worker-registry dev",
+    "dev:mock-worker": "pnpm --filter @channelpilot/mock-worker dev",
+    "test:integration": "node ./scripts/smoke-local.mjs",
+    "smoke:local": "node ./scripts/smoke-local.mjs"
+  },
+  "devDependencies": {
+    "@prisma/client": "^6.5.0",
+    "@types/node": "^24.0.13",
+    "prisma": "^6.5.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.2",
+    "vitest": "^3.2.4"
+  }
+}

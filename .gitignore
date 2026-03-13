@@ -1,0 +1,8 @@
+node_modules
+dist
+.turbo
+.pnpm-store
+.env
+.data
+coverage
+packages/db/generated

@@ -1,0 +1,17 @@
+{
+  "name": "@channelpilot/openclaw-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@channelpilot/shared-types": "workspace:*",
+    "uuid": "^11.1.0"
+  }
+}

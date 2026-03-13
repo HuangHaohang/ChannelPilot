@@ -1,0 +1,286 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TaskState {
+  queued
+  starting
+  binding
+  running
+  waiting_input
+  blocked
+  cancelling
+  summarizing
+  completed
+  failed
+  cancelled
+  lost
+}
+
+enum TaskDesiredState {
+  none
+  running
+  cancelled
+  blocked
+}
+
+enum TaskKind {
+  main
+  follow_up
+}
+
+enum AttemptState {
+  created
+  assigned
+  accepted
+  running
+  waiting_input
+  completed
+  failed
+  cancelled
+  lost
+}
+
+enum TaskEventType {
+  TASK_CREATED
+  COMMAND_NORMALIZED
+  TASK_ACCEPTED
+  STATE_TRANSITIONED
+  THREAD_BOUND
+  SESSION_SPAWNED
+  SESSION_REUSED
+  SESSION_STATUS_SYNCED
+  STEER_ACCEPTED
+  STOP_REQUESTED
+  RESUME_REQUESTED
+  WORKER_ASSIGNED
+  WORKER_HEARTBEAT_RECORDED
+  WORKER_MARKED_LOST
+  NOTIFICATION_ENQUEUED
+  NOTIFICATION_DELIVERED
+  NOTIFICATION_FAILED
+  RECONCILIATION_APPLIED
+  TASK_MARKED_LOST
+  TASK_COMPLETED
+  TASK_FAILED
+  TASK_CANCELLED
+}
+
+enum WorkerStatus {
+  idle
+  busy
+  offline
+  lost
+}
+
+enum NotificationStatus {
+  pending
+  delivering
+  delivered
+  failed
+  dead_letter
+}
+
+enum NotificationKind {
+  receipt
+  progress
+  waiting_input
+  final
+  system
+}
+
+model Task {
+  taskId              String             @id @map("task_id")
+  title               String
+  requestedGoal       String             @map("requested_goal")
+  backend             String
+  state               TaskState
+  desiredState        TaskDesiredState   @default(none) @map("desired_state")
+  stateVersion        BigInt             @default(0) @map("state_version")
+  requesterId         String             @map("requester_id")
+  channel             String
+  accountId           String             @map("account_id")
+  threadKey           String             @map("thread_key")
+  repo                String?
+  cwd                 String?
+  priority            String             @default("normal")
+  taskKind            TaskKind           @default(main) @map("task_kind")
+  currentAttemptId    String?            @map("current_attempt_id")
+  lastSummary         String?            @map("last_summary")
+  lastEmittedSummary  String?            @map("last_emitted_summary")
+  lastNotifiedAt      DateTime?          @map("last_notified_at") @db.Timestamptz(6)
+  createdAt           DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  completedAt         DateTime?          @map("completed_at") @db.Timestamptz(6)
+  attempts            TaskAttempt[]
+  events              TaskEvent[]
+  artifacts           TaskArtifact[]
+  inboundMessages     InboundMessage[]
+  notificationOutbox  NotificationOutbox[]
+
+  @@index([threadKey, state])
+  @@map("tasks")
+}
+
+model TaskAttempt {
+  attemptId               String       @id @map("attempt_id")
+  taskId                  String       @map("task_id")
+  workerType              String       @map("worker_type")
+  workerHost              String?      @map("worker_host")
+  acpSessionId            String?      @map("acp_session_id")
+  acpSessionKey           String?      @map("acp_session_key")
+  bindingKey              String?      @map("binding_key")
+  assignedWorkerId        String?      @map("assigned_worker_id")
+  attemptState            AttemptState @default(created) @map("attempt_state")
+  assignmentMetadataJson  Json         @default("{}") @map("assignment_metadata_json")
+  startedAt               DateTime     @default(now()) @map("started_at") @db.Timestamptz(6)
+  endedAt                 DateTime?    @map("ended_at") @db.Timestamptz(6)
+  exitCode                Int?         @map("exit_code")
+  resultJson              Json?        @map("result_json")
+  task                    Task         @relation(fields: [taskId], references: [taskId])
+
+  @@index([taskId])
+  @@map("task_attempts")
+}
+
+model TaskEvent {
+  eventId      BigInt        @id @default(autoincrement()) @map("event_id")
+  taskId       String        @map("task_id")
+  attemptId    String?       @map("attempt_id")
+  eventType    TaskEventType @map("event_type")
+  source       String
+  reason       String?
+  payloadJson  Json          @default("{}") @map("payload_json")
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  task         Task          @relation(fields: [taskId], references: [taskId])
+
+  @@index([taskId, createdAt])
+  @@map("task_events")
+}
+
+model TaskArtifact {
+  artifactId    BigInt    @id @default(autoincrement()) @map("artifact_id")
+  taskId        String    @map("task_id")
+  attemptId     String?   @map("attempt_id")
+  kind          String
+  pathOrUrl     String    @map("path_or_url")
+  metadataJson  Json      @default("{}") @map("metadata_json")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  task          Task      @relation(fields: [taskId], references: [taskId])
+
+  @@map("task_artifacts")
+}
+
+model TaskLease {
+  taskId       String    @id @map("task_id")
+  leaseOwner   String    @map("lease_owner")
+  leaseToken   String    @map("lease_token")
+  leaseUntil   DateTime  @map("lease_until") @db.Timestamptz(6)
+  heartbeatAt  DateTime  @map("heartbeat_at") @db.Timestamptz(6)
+
+  @@index([leaseUntil])
+  @@map("task_leases")
+}
+
+model OpenClawThread {
+  threadKey         String    @id @map("thread_key")
+  channel           String
+  accountId         String    @map("account_id")
+  externalThreadId  String?   @map("external_thread_id")
+  currentTaskId     String?   @map("current_task_id")
+  currentBindingKey String?   @map("current_binding_key")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("openclaw_threads")
+}
+
+model Worker {
+  workerId          String       @id @map("worker_id")
+  label             String
+  host              String
+  capabilitiesJson  Json         @default("{}") @map("capabilities_json")
+  metadataJson      Json         @default("{}") @map("metadata_json")
+  status            WorkerStatus @default(idle)
+  lastSeenAt        DateTime     @map("last_seen_at") @db.Timestamptz(6)
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([lastSeenAt])
+  @@map("workers")
+}
+
+model IngestIdempotency {
+  recordId         String    @id @map("record_id")
+  idempotencyKey   String    @map("idempotency_key")
+  requesterId      String    @map("requester_id")
+  threadKey        String    @map("thread_key")
+  taskId           String?   @map("task_id")
+  responseJson     Json?     @map("response_json")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([idempotencyKey, requesterId, threadKey])
+  @@map("ingest_idempotency")
+}
+
+model InboundMessage {
+  messageId              String    @id @map("message_id")
+  channel                String
+  accountId              String    @map("account_id")
+  threadKey              String    @map("thread_key")
+  requesterId            String    @map("requester_id")
+  sourceMessageId        String    @map("source_message_id")
+  rawPayloadJson         Json      @map("raw_payload_json")
+  normalizedCommandJson  Json      @map("normalized_command_json")
+  idempotencyKey         String    @map("idempotency_key")
+  taskId                 String?   @map("task_id")
+  processingResult       String    @map("processing_result")
+  processedAt            DateTime  @default(now()) @map("processed_at") @db.Timestamptz(6)
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  task                   Task?     @relation(fields: [taskId], references: [taskId])
+
+  @@unique([channel, accountId, threadKey, sourceMessageId])
+  @@index([threadKey, processedAt])
+  @@map("inbound_messages")
+}
+
+model NotificationOutbox {
+  notificationId   String             @id @map("notification_id")
+  taskId           String             @map("task_id")
+  threadKey        String             @map("thread_key")
+  notificationKind NotificationKind   @map("notification_kind")
+  status           NotificationStatus @default(pending)
+  dedupeKey        String             @unique @map("dedupe_key")
+  attemptCount     Int                @default(0) @map("attempt_count")
+  nextAttemptAt    DateTime           @map("next_attempt_at") @db.Timestamptz(6)
+  lastError        String?            @map("last_error")
+  deliveredAt      DateTime?          @map("delivered_at") @db.Timestamptz(6)
+  claimedBy        String?            @map("claimed_by")
+  claimedAt        DateTime?          @map("claimed_at") @db.Timestamptz(6)
+  payloadJson      Json               @map("payload_json")
+  stateVersion     BigInt             @map("state_version")
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  task             Task               @relation(fields: [taskId], references: [taskId])
+
+  @@index([status, nextAttemptAt])
+  @@map("notification_outbox")
+}
+
+model AuditLog {
+  auditId      BigInt    @id @default(autoincrement()) @map("audit_id")
+  actorId      String    @map("actor_id")
+  action       String
+  targetType   String    @map("target_type")
+  targetId     String    @map("target_id")
+  payloadJson  Json      @default("{}") @map("payload_json")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("audit_logs")
+}

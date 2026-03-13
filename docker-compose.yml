@@ -1,0 +1,156 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: channelpilot
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d channelpilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  channelpilot-bootstrap:
+    image: node:20-bookworm
+    working_dir: /app
+    command: /bin/sh -lc "corepack enable && pnpm install && pnpm --filter @channelpilot/db exec prisma generate --schema prisma/schema.prisma && pnpm db:migrate"
+    env_file:
+      - .env
+    environment:
+      CI: "true"
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/channelpilot
+    volumes:
+      - ./:/app
+      - ./.data:/app/.data
+      - node-modules:/app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  channelpilot-api:
+    image: node:20-bookworm
+    working_dir: /app
+    command: /bin/sh -lc "corepack enable && pnpm dev:api"
+    env_file:
+      - .env
+    environment:
+      CI: "true"
+      API_PORT: 4300
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/channelpilot
+      API_BASE_URL: http://channelpilot-api:4300
+      WORKER_REGISTRY_URL: http://channelpilot-worker-registry:4301
+    volumes:
+      - ./:/app
+      - ./.data:/app/.data
+      - node-modules:/app/node_modules
+    depends_on:
+      channelpilot-bootstrap:
+        condition: service_completed_successfully
+    ports:
+      - "4300:4300"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4300/readyz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  channelpilot-worker-registry:
+    image: node:20-bookworm
+    working_dir: /app
+    command: /bin/sh -lc "corepack enable && pnpm dev:worker-registry"
+    env_file:
+      - .env
+    environment:
+      CI: "true"
+      WORKER_REGISTRY_PORT: 4301
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/channelpilot
+      API_BASE_URL: http://channelpilot-api:4300
+      WORKER_REGISTRY_URL: http://channelpilot-worker-registry:4301
+    volumes:
+      - ./:/app
+      - ./.data:/app/.data
+      - node-modules:/app/node_modules
+    depends_on:
+      channelpilot-bootstrap:
+        condition: service_completed_successfully
+    ports:
+      - "4301:4301"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4301/readyz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  channelpilot-notifier:
+    image: node:20-bookworm
+    working_dir: /app
+    command: /bin/sh -lc "corepack enable && pnpm dev:notifier"
+    env_file:
+      - .env
+    environment:
+      CI: "true"
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/channelpilot
+      API_BASE_URL: http://channelpilot-api:4300
+      WORKER_REGISTRY_URL: http://channelpilot-worker-registry:4301
+    volumes:
+      - ./:/app
+      - ./.data:/app/.data
+      - node-modules:/app/node_modules
+    depends_on:
+      channelpilot-bootstrap:
+        condition: service_completed_successfully
+      channelpilot-api:
+        condition: service_healthy
+
+  channelpilot-reconciler:
+    image: node:20-bookworm
+    working_dir: /app
+    command: /bin/sh -lc "corepack enable && pnpm dev:reconciler"
+    env_file:
+      - .env
+    environment:
+      CI: "true"
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/channelpilot
+      API_BASE_URL: http://channelpilot-api:4300
+      WORKER_REGISTRY_URL: http://channelpilot-worker-registry:4301
+    volumes:
+      - ./:/app
+      - ./.data:/app/.data
+      - node-modules:/app/node_modules
+    depends_on:
+      channelpilot-bootstrap:
+        condition: service_completed_successfully
+      channelpilot-api:
+        condition: service_healthy
+
+  channelpilot-mock-worker:
+    image: node:20-bookworm
+    working_dir: /app
+    command: /bin/sh -lc "corepack enable && pnpm dev:mock-worker"
+    env_file:
+      - .env
+    environment:
+      CI: "true"
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/channelpilot
+      API_BASE_URL: http://channelpilot-api:4300
+      WORKER_REGISTRY_URL: http://channelpilot-worker-registry:4301
+    volumes:
+      - ./:/app
+      - ./.data:/app/.data
+      - node-modules:/app/node_modules
+    depends_on:
+      channelpilot-bootstrap:
+        condition: service_completed_successfully
+      channelpilot-api:
+        condition: service_healthy
+      channelpilot-worker-registry:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  node-modules:
